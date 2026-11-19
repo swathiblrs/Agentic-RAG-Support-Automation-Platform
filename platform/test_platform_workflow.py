@@ -3,6 +3,7 @@ from unittest.mock import Mock
 
 import api
 from platform_workflow import PlatformWorkflow
+from intake_classifier import classify_intake
 import json
 import httpx
 
@@ -26,15 +27,21 @@ def services():
     )
 
 
-def test_parent_graph_is_real_and_contains_support_and_classification():
+def run_case(deps, request):
+    classification = classify_intake(request, deps.worker.classify)
+    return PlatformWorkflow(deps).run(request, classification)
+
+
+def test_parent_graph_consumes_classification_and_contains_both_components():
     nodes = PlatformWorkflow(services()).graph.get_graph().nodes
-    assert {"intake", "support", "investigate", "verify", "retrieve_documentation",
+    assert {"initialize", "support", "investigate", "verify", "retrieve_documentation",
             "refine_analysis", "finalize"} <= set(nodes)
+    assert "intake" not in nodes
 
 
 def test_production_without_documentation_gap_does_not_retrieve():
     deps = services()
-    result = PlatformWorkflow(deps).run(api.Request(question="Checkout reports HTTP 503"))
+    result = run_case(deps, api.Request(question="Checkout reports HTTP 503"))
     assert result["orchestration_engine"] == "langgraph"
     deps.investigate.assert_called_once()
     deps.retrieve_documentation.assert_not_called()
@@ -49,7 +56,7 @@ def test_qwen_requests_documents_then_receives_them_once():
     revised = report("Another query that must not loop")
     revised["executive_summary"] = "Revised assessment"
     deps.refine_analysis.return_value = revised
-    result = PlatformWorkflow(deps).run(api.Request(question="Checkout reports HTTP 503"))
+    result = run_case(deps, api.Request(question="Checkout reports HTTP 503"))
     deps.retrieve_documentation.assert_called_once_with("Timeout runbook for storage dependencies", "production", False)
     assert deps.refine_analysis.call_args.args[2] == docs
     assert result["investigation"]["executive_summary"] == "Revised assessment"
@@ -66,7 +73,7 @@ def test_empty_or_failed_lookup_retains_original_assessment():
             deps.retrieve_documentation.side_effect = response
         else:
             deps.retrieve_documentation.return_value = response
-        result = PlatformWorkflow(deps).run(api.Request(question="Checkout reports HTTP 503"))
+        result = run_case(deps, api.Request(question="Checkout reports HTTP 503"))
         deps.refine_analysis.assert_not_called()
         assert result["investigation"]["executive_summary"] == "Initial assessment"
         assert result["documentation_exchange"]["status"] in {"no_results", "unavailable"}
@@ -78,14 +85,15 @@ def test_invalid_followup_retains_initial_analysis():
     deps.retrieve_documentation.return_value = {"documents": [{"source": "guide.md", "text": "guidance"}],
                                               "workflow_engine": "llamaindex_documentation_workflow"}
     deps.refine_analysis.return_value = {"diagnostic_analysis": {"status": "unavailable"}}
-    result = PlatformWorkflow(deps).run(api.Request(question="Checkout reports HTTP 503"))
+    result = run_case(deps, api.Request(question="Checkout reports HTTP 503"))
     assert result["investigation"]["diagnostic_analysis"]["status"] == "completed"
     assert result["documentation_exchange"]["analysis_status"] == "unavailable"
 
 
 def test_clarification_never_runs_support_model_or_investigation():
     deps = services()
-    result = PlatformWorkflow(deps).run(api.Request(question="Something is broken"))
+    result = run_case(deps, api.Request(question="Something is broken"))
+
     assert result["routing"]["path"] == "clarify"
     deps.worker.classify.assert_not_called()
     deps.investigate.assert_not_called()
@@ -143,3 +151,37 @@ def test_initial_incident_retrieval_is_also_domain_scoped():
         IncidentInput(title="Storage request timeout after checkout failed", domain="production"))
     assert references
     assert all(item.source == "SRE Runbook PROD-001" for item in references)
+
+
+def test_graph_does_not_call_the_initial_classifier_again():
+    deps = services()
+    request = api.Request(question="Checkout returns HTTP 503")
+    classification = classify_intake(request, deps.worker.classify)
+    deps.worker.classify.side_effect = AssertionError("Initial classification must remain outside the graph")
+    result = PlatformWorkflow(deps).run(request, classification)
+    assert result["classification"] == classification
+    assert result["execution_trace"][0] == "Unified classification before LangGraph"
+    deps.worker.classify.assert_not_called()
+
+
+def test_api_classifies_before_invoking_langgraph(monkeypatch):
+    events = []
+    decision = {"domain": "production"}
+
+    def classify(request, ticket_classifier):
+        events.append("classification")
+        return decision
+
+    class Graph:
+        def __init__(self, services):
+            assert events == ["classification"]
+
+        def run(self, request, classification, started=None):
+            assert classification is decision and started is not None
+            events.append("langgraph")
+            return {"answer": "done"}
+
+    monkeypatch.setattr(api, "classify_intake", classify)
+    monkeypatch.setattr(api, "PlatformWorkflow", Graph)
+    assert api.execute(api.Request(question="Checkout HTTP 503")) == {"answer": "done"}
+    assert events == ["classification", "langgraph"]

@@ -1,10 +1,11 @@
 # Parent LangGraph and LlamaIndex Integration
 
-FastAPI authenticates requests; the durable worker invokes `PlatformWorkflow.run()`. The API no longer manually sequences the support and incident flows. All initial classification, support calls, investigation, route checking, model-requested documentation retrieval and final assembly are parent LangGraph nodes.
+FastAPI authenticates requests. The durable worker first calls the main `classify_intake()` entry point, then passes its result into `PlatformWorkflow.run(request, classification)`. LangGraph does not run initial classification again: it coordinates LlamaIndex support and Qwen-based incident investigation, route checking, requested documentation and final assembly.
 
 ```mermaid
 flowchart TD
-  START --> I["intake: existing domain policy/model + IT ticket classifier"]
+  C["Main classification before LangGraph"] --> START
+  START --> I["initialize: consume precomputed classification"]
   I -->|"Clarify"| F["finalize"]
   I -->|"IT/support context"| S["support: call LlamaIndex workflow with intake details"]
   I -->|"Incident without IT context"| G["investigate: invoke domain incident LangGraph"]
@@ -24,8 +25,8 @@ flowchart TD
 
 ## Responsibility Boundaries
 
-- `platform_workflow.py`: parent state graph and conditional edges. Shared state carries the request, unified classification/result, provisional report, reroute count, retrieved documents and start time.
-- `intake_classifier.py`: unchanged models and domain policy behind one intake stage. IT details and retrieval hints are computed once, not retrained or repeatedly classified downstream. QLoRA remains an experiment.
+- `platform_workflow.py`: parent state graph and conditional edges. Shared state carries the request, precomputed classification/result, provisional report, reroute count, retrieved documents and start time. Initialization only consumes classification.
+- `intake_classifier.py`: the main classification stage before the graph, using unchanged models and domain policy. IT details and retrieval hints are computed once and reused downstream. QLoRA remains a domain-classification experiment; the generative investigation model is pretrained.
 - `support/src/orchestrator.py`: LlamaIndex support subworkflow. It uses the precomputed ticket decision, hybrid support retrieval, offline support answer composition, confidence checks and draft preparation.
 - Incident LangGraphs: parse logs/events, retrieve initial runbooks, run local domain handlers and optional live local Qwen synthesis. They are nested calls beneath the parent investigation node.
 - `support/src/documentation_workflow.py`: an actual LlamaIndex event workflow that returns selected incident runbook candidates plus support retrieval where IT context applies. It does not run ticket classification or generate an answer again.
@@ -48,6 +49,6 @@ Job persistence and retries remain outside the workflow in the durable worker. P
 
 Tests cover real parent graph construction, clarification, routine/incident routes, preservation of existing team/priority behavior, one-reroute fencing, exact forwarding of a model search request, a real LlamaIndex retrieval subworkflow, passing passages back to Qwen, and preservation of initial results after empty/failed retrieval or invalid follow-up.
 
-The final platform suite passed **141 tests**. A real synthetic queued request completed the Qwen → LlamaIndex → Qwen round trip in approximately **19.8 seconds** on the local Mac. The returned context was the production runbook, and the model still identified the missing storage-specific retry procedure. This is a functional smoke test, not a diagnostic-accuracy or latency benchmark. Desktop/mobile browser checks also passed.
+The final platform suite passed **143 tests**. A real synthetic queued request completed the Qwen → LlamaIndex → Qwen round trip in approximately **19.8 seconds** on the local Mac. The returned context was the production runbook, and the model still identified the missing storage-specific retry procedure. This is a functional smoke test, not a diagnostic-accuracy or latency benchmark. Desktop/mobile browser checks also passed.
 
 No new packages, models, cloud provider or paid service are required for this refactor. Existing Qwen classifier metrics and historical warm-cache throughput are not measurements of this new parent graph.

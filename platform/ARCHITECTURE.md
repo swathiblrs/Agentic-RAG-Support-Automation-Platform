@@ -1,6 +1,6 @@
 # Background Job Flow
 
-The [parent LangGraph](PARENT_WORKFLOW.md) now owns request-level orchestration, including unified intake, LlamaIndex support, incident subgraphs and bounded Qwen-requested documentation retrieval. API helpers provide services to graph nodes rather than manually sequencing the workflows.
+The main classifier runs before the [parent LangGraph](PARENT_WORKFLOW.md). The graph consumes that decision and coordinates LlamaIndex support, Qwen-based incident subgraphs and bounded documentation retrieval. API helpers provide services to graph nodes rather than manually sequencing these components.
 
 The [complete flowcharts](END_TO_END_FLOW.md) describe the updated local Qwen path. The older bitmap/vector diagrams below do not include the parser and live local-model node.
 

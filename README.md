@@ -8,52 +8,75 @@ This project helps IT support teams answer repeated questions, find relevant doc
 
 ## 🏗️ System Architecture
 
+The two diagrams below show separate components managed by the same LangGraph orchestrator. Main classification runs before either component.
+
+### LlamaIndex Support Flow
+
 ```mermaid
 flowchart TD
-    User["Browser"] --> API["FastAPI: authentication and job submission"]
-    API --> Worker["SQLite queue and background worker"]
-    subgraph Parent["LANGGRAPH - TOP-LEVEL ORCHESTRATOR"]
-        Intake["Unified classification"]
-        Choice{"Support or investigation?"}
-        subgraph LlamaIndex["LlamaIndex components INSIDE LangGraph"]
-            Support["Support RAG and provisional draft"]
-            Docs["Requested documentation lookup"]
+    Classified["Main classification: domain and IT ticket details"] --> Select["LangGraph selects support"]
+    subgraph ParentSupport["LANGGRAPH ORCHESTRATION"]
+        Select
+        subgraph LI["LlamaIndex support component"]
+            Reuse["Reuse classification and retrieval hints"]
+            Dense["MiniLM tokenization and query embedding"]
+            Vector["ChromaDB: top 5 chunks"]
+            Lexical["Tokenize text: BM25 top 5 documents"]
+            Merge["Merge, deduplicate and rerank"]
+            Context["Select up to 3 results"]
+            Answer["Compose support answer or insufficient-evidence fallback"]
+            Confidence["Confidence and next-action rules"]
+            Draft["Prepare provisional ticket draft"]
+            Reuse --> Dense --> Vector --> Merge
+            Reuse --> Lexical --> Merge
+            Merge --> Context --> Answer --> Confidence --> Draft
         end
-        subgraph Investigation["Incident investigation subgraph"]
-            Incident["Parse logs and collect evidence"]
-            Qwen["Local Qwen analysis"]
-            Incident --> Qwen
-        end
-        Verify["Route verification"]
-        Gap{"More documentation needed?"}
-        Reassess["Qwen reassessment"]
-        Final["Final answer and suggested ticket"]
-        Intake --> Choice
-        Choice -->|"Support context"| Support
-        Choice -->|"Incident"| Incident
-        Choice -->|"Unclear"| Final
-        Support -->|"Routine"| Verify
-        Support -->|"IT incident"| Incident
-        Qwen --> Verify
-        Verify --> Gap
-        Gap -->|"One lookup maximum"| Docs
-        Docs -->|"Documents"| Reassess
-        Docs -->|"No result"| Final
-        Reassess --> Final
-        Gap -->|"No"| Final
+        Select --> Reuse
+        Draft --> Final["LangGraph route verification and final assembly"]
     end
-    Worker --> Intake
-    Final --> Saved["Save case, job status and in-app notification"]
-    Saved --> Display["Browser polls and displays result"]
+    Final --> Saved["Persist result and job notification"]
+    Saved --> Browser["Browser displays guidance and suggested team"]
 ```
 
-**LlamaIndex is inside the parent LangGraph, not a separate top-level orchestrator.** Its support workflow and documentation lookup are called by LangGraph nodes. The incident workflow is another component inside that same parent graph.
+Support uses the existing pretrained MiniLM embeddings, hybrid retrieval and text/template answer composition. It does not call the incident Qwen model. IT incidents can continue from this support component into investigation before final assembly.
+
+### Qwen Incident Investigation Flow
+
+```mermaid
+flowchart TD
+    Classified["Main classification: domain and workflow path"] --> Select["LangGraph selects investigation"]
+    subgraph ParentIncident["LANGGRAPH ORCHESTRATION"]
+        Select --> Parse["Python parses JSON or plain-text logs"]
+        Parse --> Evidence["Preserve evidence IDs, correlate request IDs and redact prompt inputs"]
+        Evidence --> Runbooks["Retrieve domain-scoped incident runbooks"]
+        Runbooks --> Domain["Domain-specific triage and evidence collection"]
+        Domain --> Qwen["Local Qwen: observations, severity, hypotheses and missing evidence"]
+        Qwen --> Validate["Validate completion, schema and supplied evidence IDs"]
+        Validate --> Verify["Verify route; at most one alternate-domain investigation"]
+        Verify --> Gap{"Qwen requests documentation?"}
+        subgraph LI["LlamaIndex documentation component"]
+            Lookup["Search scoped runbooks and relevant support documents"]
+        end
+        Gap -->|"Yes: one round maximum"| Lookup
+        Lookup -->|"Passages found"| Refine["Qwen reassesses with original evidence and new documents"]
+        Lookup -->|"Empty or failed"| Final["Finalize advisory report and suggested ticket"]
+        Refine --> Check["Validate follow-up; retain initial assessment if invalid"]
+        Check --> Final
+        Gap -->|"No"| Final
+    end
+    Final --> Saved["Persist result and job notification"]
+    Saved --> Browser["Browser displays analysis for human review"]
+```
+
+The incident Qwen is currently pretrained, served locally through Ollama; investigation-specific fine-tuning is future work. Simulated tool records are excluded from its prompt. Failed initial analysis is explicitly marked unavailable. A documentation lookup cannot supply missing production logs or establish a root cause. No remediation or external ticket/team action happens automatically.
+
+**Main classification runs before LangGraph.** LangGraph then coordinates two components: **LlamaIndex** for knowledge retrieval/routine support and **Qwen-based incident investigation** for parsed evidence and advisory analysis. LlamaIndex is called inside LangGraph, not used as a separate top-level orchestrator. The installed investigation Qwen is pretrained; incident-specific fine-tuning is future work, separate from the existing QLoRA domain-classification experiment.
 
 This overview omits recovery edges for readability: route verification can trigger one alternate-domain investigation, with support first if needed for IT. FastAPI returns HTTP 202 and a job ID; the browser polls for completion. Routine requests do not call Qwen. Unavailable models, empty lookup and invalid follow-up are reported explicitly. Additional documents are guidance, not proof. No ticket submission, external team message or remediation is automatic. See the [exact parent graph](platform/PARENT_WORKFLOW.md) for all transitions.
 
 **High-level workflow**
 
-Login -> POST /jobs -> durable queue + HTTP 202/job ID -> independent worker -> parent LangGraph -> unified intake -> LlamaIndex support and/or incident LangGraph -> verification and bounded Qwen/LlamaIndex documentation exchange -> saved case + completion event + user notification.
+Login -> POST /jobs -> durable queue + HTTP 202/job ID -> independent worker -> main classification -> LangGraph -> LlamaIndex support and/or Qwen-based incident investigation -> verification and bounded documentation exchange -> saved case + completion event + user notification.
 
 **Core stack:** FastAPI, LlamaIndex, LangGraph, SentenceTransformers, ChromaDB, BM25, PyTorch, scikit-learn, Ollama (local Qwen), JWT, and SQLite. The combined interface is a lightweight web UI; the original support application also includes Streamlit.
 
@@ -61,7 +84,7 @@ Login -> POST /jobs -> durable queue + HTTP 202/job ID -> independent worker -> 
 
 [Detailed end-to-end flowcharts](platform/END_TO_END_FLOW.md) cover ingestion, tokenization, embeddings, initial classification, hybrid retrieval, both workflow engines, validation, and browser delivery.
 
-[Parent LangGraph and LlamaIndex orchestration](platform/PARENT_WORKFLOW.md): LangGraph owns classification, support, investigation and final assembly. Qwen can request one additional document lookup through a LlamaIndex subworkflow and reassess with those passages. Empty retrieval or invalid follow-up preserves the original assessment. This is bounded documentation retrieval, not autonomous live debugging or unlimited tool use.
+[Parent LangGraph and LlamaIndex orchestration](platform/PARENT_WORKFLOW.md): LangGraph consumes the main classifier's result and owns support, investigation and final assembly. Qwen can request one additional document lookup through a LlamaIndex subworkflow and reassess with those passages. Empty retrieval or invalid follow-up preserves the original assessment. This is bounded documentation retrieval, not autonomous live debugging or unlimited tool use.
 
 The local launcher now requests **Qwen3 1.7B through local-only Ollama** for incident analysis. Python first parses supplied logs and correlates request IDs; the model returns advisory observations, severity, possible causes, next checks and missing evidence. Schema and evidence-ID validation reject malformed responses, and reported severity cannot be lowered. Simulated tool records are excluded from the model prompt. These checks do not establish semantic correctness. The initial router, classifier and support generation path are unchanged; no ticket or message is automatically sent.
 
@@ -190,7 +213,7 @@ Open http://127.0.0.1:8765 and log in with `demo` / `local-demo-only`. This is a
 
 ## 🧪 Tests and Training
 
-The platform suite passed 141 tests covering local Qwen validation, unified classification intake, parent LangGraph orchestration and bounded LlamaIndex documentation exchange. Two additional support tests verify that supplied intake decisions bypass downstream classifier calls and standalone support classifies once. A real local Qwen request also completed a documentation-search/reassessment round trip on synthetic logs. These are not production diagnostic-quality results.
+The platform suite passed 143 tests covering local Qwen validation, unified classification intake, parent LangGraph orchestration and bounded LlamaIndex documentation exchange. Two additional support tests verify that supplied intake decisions bypass downstream classifier calls and standalone support classifies once. A real local Qwen request also completed a documentation-search/reassessment round trip on synthetic logs. These are not production diagnostic-quality results.
 
 From `platform/`, with `SUPPORT_PYTHON` set and ingestion complete:
 

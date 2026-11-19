@@ -1,16 +1,16 @@
-"""Parent LangGraph: intake, support, investigation, verification, bounded retrieval."""
+"""LangGraph consumes preclassified input and coordinates support and investigation."""
 from time import perf_counter
 from typing import TypedDict
 from uuid import uuid4
 
 from langgraph.graph import StateGraph, START, END
 
-from intake_classifier import classify_intake
 from route_verification import verify_route
 
 
 class PlatformState(TypedDict):
     request: object
+    classification: dict
     result: dict
     report: object
     reroutes: int
@@ -22,11 +22,11 @@ class PlatformWorkflow:
     def __init__(self, services):
         self.services = services
         graph = StateGraph(PlatformState)
-        for name in ("intake", "support", "investigate", "verify", "reroute",
+        for name in ("initialize", "support", "investigate", "verify", "reroute",
                      "retrieve_documentation", "refine_analysis", "finalize"):
             graph.add_node(name, getattr(self, name))
-        graph.add_edge(START, "intake")
-        graph.add_conditional_edges("intake", self.after_intake,
+        graph.add_edge(START, "initialize")
+        graph.add_conditional_edges("initialize", self.after_initialization,
                                     {"support": "support", "investigate": "investigate", "finalize": "finalize"})
         graph.add_conditional_edges("support", self.after_support,
                                     {"investigate": "investigate", "verify": "verify"})
@@ -43,16 +43,18 @@ class PlatformWorkflow:
         graph.add_edge("finalize", END)
         self.graph = graph.compile()
 
-    def run(self, request):
-        return self.graph.invoke({"request": request, "result": {}, "report": None,
-                                  "reroutes": 0, "documents": [], "started": perf_counter()})["result"]
+    def run(self, request, classification, started=None):
+        return self.graph.invoke({"request": request, "classification": classification,
+                                  "result": {}, "report": None, "reroutes": 0, "documents": [],
+                                  "started": perf_counter() if started is None else started})["result"]
 
-    def intake(self, state):
+    def initialize(self, state):
         request = state["request"]
-        classification = classify_intake(request, self.services.worker.classify)
+        classification = state["classification"]
         result = {"id": str(uuid4()), "question": request.question, "classification": classification,
                   "routing": classification["routing"], "support": None, "investigation": None,
-                  "ticket_draft": None, "execution_trace": ["Parent LangGraph / unified intake"],
+                  "ticket_draft": None,
+                  "execution_trace": ["Unified classification before LangGraph", "Parent LangGraph / initialize"],
                   "orchestration_engine": "langgraph", "mode": "local_offline",
                   "limitations": ["Domain policy/model scores are uncalibrated.",
                                  "Local tools can be simulated; no external actions are executed.",
@@ -64,7 +66,7 @@ class PlatformWorkflow:
         return {"result": result}
 
     @staticmethod
-    def after_intake(state):
+    def after_initialization(state):
         routing = state["result"]["routing"]
         if routing["path"] == "clarify":
             return "finalize"

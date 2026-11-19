@@ -2,7 +2,7 @@
 
 ## Current Top-Level Coordinator
 
-All request classification and support/investigation execution now run under a parent LangGraph. See [the parent graph](PARENT_WORKFLOW.md) for its exact nodes and bounded Qwen ↔ LlamaIndex documentation exchange. The lower-level ingestion/retrieval steps below are unchanged. The parent final node calls the result composer; the API/job worker persists the result.
+Main classification runs first, outside LangGraph. Its domain, ticket details and retrieval hints feed the parent LangGraph, which coordinates the LlamaIndex support component and Qwen-based investigation component. See [the parent graph](PARENT_WORKFLOW.md) for exact nodes and bounded Qwen ↔ LlamaIndex documentation exchange. The lower-level ingestion/retrieval steps below are unchanged. The parent final node calls the result composer; the API/job worker persists the result.
 
 The domain routing policy and trained models are unchanged. A unified intake entry point now calls that policy plus the existing IT ticket model where applicable, and returns domain, workflow path, subcategory, priority, suggested team and retrieval hints together. The downstream support workflow consumes that decision without reclassifying. This is consolidation of existing models, not a new joint model or QLoRA deployment. Incident nodes parse supplied evidence and call local pretrained Qwen3 1.7B through Ollama; it is **not** the QLoRA classification adapter.
 
@@ -38,7 +38,7 @@ flowchart TD
   F --> H["Queue limit: 503, otherwise 202 + job ID"]
   F --> I["Independent worker claims job transactionally"]
   I --> J["Unique lease token; heartbeat renews it"]
-  J --> K["execute: parent LangGraph intake node"]
+  J --> K["execute: main classification, then parent LangGraph"]
   I --> L["Failure: bounded retries or terminal failure; expired lease is reclaimable"]
 ```
 

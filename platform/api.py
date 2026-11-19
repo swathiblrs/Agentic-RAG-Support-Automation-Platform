@@ -4,6 +4,7 @@ import secrets
 import sqlite3
 import sys
 import json
+from time import perf_counter
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ from app.services.generic_incident_graph import GenericIncidentGraph
 from app.services.investigation_graph import InvestigationGraph
 from domain_router import route
 from platform_workflow import PlatformWorkflow
+from intake_classifier import classify_intake
 from app.rag.retriever import SecurityKnowledgeRetriever
 from app.services.local_analysis import analyze as analyze_local_evidence, redact
 from types import SimpleNamespace
@@ -190,7 +192,9 @@ def compose_result(request, result, report):
 
 
 def execute(request):
-    return PlatformWorkflow(sys.modules[__name__]).run(request)
+    started = perf_counter()
+    classification = classify_intake(request, worker.classify)
+    return PlatformWorkflow(sys.modules[__name__]).run(request, classification, started=started)
 
 @api.get('/', include_in_schema=False)
 def home():
