@@ -29,6 +29,7 @@ from app.services.langgraph_checkpoint import LangGraphCheckpointManager
 from app.services.llm import OllamaService
 from app.services.mcp_tools import LocalMCPToolRegistry
 from app.services.tracing import LangfuseTracer
+from app.services.local_analysis import enabled as local_analysis_enabled, parse_evidence, reasoning_node, report_summary
 
 
 class InvestigationGraph:
@@ -59,12 +60,13 @@ class InvestigationGraph:
             alert=alert,
             verdict=verdict,
             risk_score=state.risk_score,
-            executive_summary=self._summary(alert, verdict, state.risk_score),
+            executive_summary=report_summary(state, self._summary(alert, verdict, state.risk_score)),
             timeline=state.timeline,
             findings=state.findings,
             evidence=state.evidence,
             recommended_actions=self._build_actions(state),
             references=state.references,
+            diagnostic_analysis=state.enrichment.get("diagnostic_analysis", {}),
         )
 
         self.tracer.trace_investigation(report)
@@ -103,6 +105,7 @@ class InvestigationGraph:
 
     def _build_graph_builder(self):
         graph = StateGraph(InvestigationState)
+        graph.add_node("parse_logs", parse_evidence)
         graph.add_node("retrieve_context", self._retrieve_context)
         graph.add_node("soc_a2a_handoff", self._soc_a2a_handoff)
         graph.add_node("alert_triage", self.triage_agent.run)
@@ -111,7 +114,8 @@ class InvestigationGraph:
         graph.add_node("llm_reasoning", self._llm_reasoning)
         graph.add_node("remediation_recommendation", self.remediation_agent.run)
 
-        graph.add_edge(START, "retrieve_context")
+        graph.add_edge(START, "parse_logs")
+        graph.add_edge("parse_logs", "retrieve_context")
         graph.add_edge("retrieve_context", "soc_a2a_handoff")
         graph.add_edge("soc_a2a_handoff", "alert_triage")
         graph.add_edge("alert_triage", "threat_enrichment")
@@ -128,12 +132,13 @@ class InvestigationGraph:
             alert=state.alert,
             verdict=verdict,
             risk_score=state.risk_score,
-            executive_summary=self._summary(state.alert, verdict, state.risk_score),
+            executive_summary=report_summary(state, self._summary(state.alert, verdict, state.risk_score)),
             timeline=state.timeline,
             findings=state.findings,
             evidence=state.evidence,
             recommended_actions=self._build_actions(state),
             references=state.references,
+            diagnostic_analysis=state.enrichment.get("diagnostic_analysis", {}),
         )
         self.tracer.trace_investigation(report)
         INVESTIGATIONS_TOTAL.labels(severity=state.alert.severity.value, verdict=verdict.value).inc()
@@ -206,6 +211,8 @@ class InvestigationGraph:
         return state
 
     def _llm_reasoning(self, state: InvestigationState) -> InvestigationState:
+        if local_analysis_enabled():
+            return reasoning_node(state)
         analysis = self.llm.analyze_alert(state.alert, state.references)
         state.timeline.append("LLM reasoning generated a grounded investigation assessment.")
         AUTOMATED_STEPS_TOTAL.labels(domain=IncidentDomain.security.value, step="llm_reasoning").inc()

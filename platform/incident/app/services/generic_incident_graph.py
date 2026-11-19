@@ -24,6 +24,7 @@ from app.services.langgraph_checkpoint import LangGraphCheckpointManager
 from app.services.llm import OllamaService
 from app.services.mcp_tools import LocalMCPToolRegistry
 from app.services.tracing import LangfuseTracer
+from app.services.local_analysis import enabled as local_analysis_enabled, parse_evidence, reasoning_node, report_summary
 
 
 class GenericIncidentGraph:
@@ -50,12 +51,13 @@ class GenericIncidentGraph:
             incident=incident,
             status=status,
             risk_score=state.risk_score,
-            executive_summary=self._summary(incident, status, state.risk_score),
+            executive_summary=report_summary(state, self._summary(incident, status, state.risk_score)),
             timeline=state.timeline,
             findings=state.findings,
             evidence=state.evidence,
             recommended_actions=self._build_actions(state),
             references=state.references,
+            diagnostic_analysis=state.enrichment.get("diagnostic_analysis", {}),
         )
         INVESTIGATION_DURATION.observe(time.perf_counter() - started)
         return report
@@ -91,6 +93,7 @@ class GenericIncidentGraph:
 
     def _build_graph_builder(self):
         graph = StateGraph(GenericIncidentState)
+        graph.add_node("parse_logs", parse_evidence)
         graph.add_node("retrieve_context", self._retrieve_context)
         graph.add_node("classify_incident", self._classify_incident)
         graph.add_node("soc_path", self._domain_path("SOC security"))
@@ -102,7 +105,8 @@ class GenericIncidentGraph:
         graph.add_node("llm_reasoning", self._llm_reasoning)
         graph.add_node("recommend_response", self._recommend_response)
 
-        graph.add_edge(START, "retrieve_context")
+        graph.add_edge(START, "parse_logs")
+        graph.add_edge("parse_logs", "retrieve_context")
         graph.add_edge("retrieve_context", "classify_incident")
         graph.add_conditional_edges(
             "classify_incident",
@@ -133,12 +137,13 @@ class GenericIncidentGraph:
             incident=state.incident,
             status=status,
             risk_score=state.risk_score,
-            executive_summary=self._summary(state.incident, status, state.risk_score),
+            executive_summary=report_summary(state, self._summary(state.incident, status, state.risk_score)),
             timeline=state.timeline,
             findings=state.findings,
             evidence=state.evidence,
             recommended_actions=self._build_actions(state),
             references=state.references,
+            diagnostic_analysis=state.enrichment.get("diagnostic_analysis", {}),
         )
 
     def _retrieve_context(self, state: GenericIncidentState) -> GenericIncidentState:
@@ -269,6 +274,8 @@ class GenericIncidentGraph:
         return state
 
     def _llm_reasoning(self, state: GenericIncidentState) -> GenericIncidentState:
+        if local_analysis_enabled():
+            return reasoning_node(state)
         pseudo_alert = self._incident_to_security_alert(state.incident)
         analysis = self.llm.analyze_alert(pseudo_alert, state.references, domain=state.incident.domain)
         state.timeline.append("LLM reasoning generated a grounded multi-domain assessment.")
@@ -369,6 +376,8 @@ class GenericIncidentGraph:
 
     @staticmethod
     def _route_after_evidence(state: GenericIncidentState) -> str:
+        if local_analysis_enabled():
+            return "llm_reasoning"
         if state.risk_score < 35:
             state.timeline.append("Skipped live LLM reasoning for low-risk incident path.")
             return "recommend_response"

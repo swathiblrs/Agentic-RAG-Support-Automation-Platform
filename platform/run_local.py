@@ -14,11 +14,38 @@ def main():
     processes = []
     root = Path(__file__).parent
     env = dict(os.environ)
+    env.setdefault("INCIDENT_ANALYSIS_MODE", "ollama")
+    env.setdefault("LOCAL_QWEN_MODEL", "qwen3:1.7b")
+    env["OLLAMA_NO_CLOUD"] = "1"
+    env["OLLAMA_HOST"] = "127.0.0.1:11434"
+    env["OLLAMA_MAX_LOADED_MODELS"] = "1"
+    env["OLLAMA_NUM_PARALLEL"] = "1"
     env.setdefault("SUPPORT_PYTHON",str(root/".venv-support"/"bin"/"python"))
     commands = [[sys.executable,"-m","uvicorn","api:api","--host","127.0.0.1",
                  "--port",os.getenv("PORT","8765")],
                 [sys.executable,str(root/"job_worker.py")]]
     try:
+        if env["INCIDENT_ANALYSIS_MODE"] == "ollama":
+            import urllib.request
+            try:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                with opener.open("http://127.0.0.1:11434/api/tags", timeout=2):
+                    pass
+            except OSError:
+                runtime = Path.home()/"Library"/"Application Support"/"EnterpriseRAG"/"ollama"/"ollama"
+                if not runtime.is_file():
+                    raise RuntimeError("Local Ollama runtime is missing. No model is downloaded automatically.")
+                processes.append(subprocess.Popen([str(runtime),"serve"],cwd=root,env=env,start_new_session=True))
+                for _ in range(40):
+                    if stop.wait(.25):
+                        return
+                    try:
+                        with opener.open("http://127.0.0.1:11434/api/tags", timeout=1):
+                            break
+                    except OSError:
+                        continue
+                else:
+                    raise RuntimeError("Local Ollama server did not become ready.")
         for command in commands:
             processes.append(subprocess.Popen(command,cwd=root,env=env,start_new_session=True))
         while not stop.wait(.25):

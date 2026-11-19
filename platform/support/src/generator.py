@@ -9,6 +9,7 @@ def answer_question(
     question: str,
     domain: str = "it_support",
     preliminary_classification: Dict = None,
+    ticket_classification: Dict = None,
 ) -> Dict:
     """
     Generates a grounded support answer using retrieved knowledge chunks
@@ -21,7 +22,7 @@ def answer_question(
         domain=domain,
         retrieval_intents=preliminary_classification.get("retrieval_intents", []),
     )
-    ticket = classify_ticket(question)
+    ticket = ticket_classification if ticket_classification is not None else classify_ticket(question)
 
     if not retrieved_chunks:
         return {

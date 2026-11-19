@@ -8,20 +8,71 @@ This project helps IT support teams answer repeated questions, find relevant doc
 
 ## 🏗️ System Architecture
 
-![Combined platform architecture](platform/architecture.png)
+```mermaid
+flowchart TD
+    User["Browser: sign in and submit issue / logs"] --> API["FastAPI: JWT and input validation"]
+    API --> Queue[("SQLite job queue")]
+    API --> Accepted["HTTP 202 + job ID"]
+    Queue --> Worker["Persistent background worker"]
+    subgraph Parent["Parent LangGraph orchestration"]
+        Intake["Unified intake: domain policy + existing ML / ticket models"]
+        Choice{"Support or investigation?"}
+        Support["LlamaIndex support workflow"]
+        Incident["Incident LangGraph: parse logs and collect evidence"]
+        Qwen["Local Qwen: advisory incident analysis"]
+        Verify["Verify route against supplied telemetry"]
+        Gap{"Qwen requests more documentation?"}
+        Docs["LlamaIndex document lookup"]
+        Reassess["Qwen reassessment: one follow-up round maximum"]
+        Final["Compose answer, suggested team and ticket draft"]
+        Intake --> Choice
+        Choice -->|"Routine support"| Support
+        Choice -->|"Incident"| Incident
+        Choice -->|"Unclear"| Final
+        Support -->|"Routine"| Verify
+        Support -->|"IT incident"| Incident
+        Incident --> Qwen
+        Qwen --> Verify
+        Verify -->|"One automatic reroute allowed"| Incident
+        Verify -->|"No reroute"| Gap
+        Gap -->|"Yes"| Docs
+        Docs -->|"Passages found"| Reassess
+        Docs -->|"Empty or unavailable"| Final
+        Reassess --> Final
+        Gap -->|"No"| Final
+    end
+    Worker --> Intake
+    KB["Support documents: MiniLM vectors + ChromaDB + BM25"] --> Support
+    Runbooks["Domain-scoped incident runbooks"] --> Incident
+    KB --> Docs
+    Runbooks --> Docs
+    Final --> Saved[("Saved case + job event + in-app notification")]
+    Accepted --> Poll["Authenticated browser polling"]
+    Saved --> Poll
+    Poll --> Display["Display findings and draft for human review"]
+```
+
+Routine requests do not call Qwen. A reroute to IT can first run support if needed; an unavailable model, empty lookup or invalid follow-up is explicitly reported. Additional documentation is guidance, not proof of an incident. No ticket submission, team message or remediation is automatic.
 
 **High-level workflow**
 
-Login -> POST /jobs -> durable queue + HTTP 202/job ID -> independent worker -> policy + ML routing -> LlamaIndex support and/or LangGraph investigation -> saved case + completion event + user notification.
+Login -> POST /jobs -> durable queue + HTTP 202/job ID -> independent worker -> parent LangGraph -> unified intake -> LlamaIndex support and/or incident LangGraph -> verification and bounded Qwen/LlamaIndex documentation exchange -> saved case + completion event + user notification.
 
-**Core stack:** FastAPI, LlamaIndex, LangGraph, SentenceTransformers, ChromaDB, BM25, PyTorch, scikit-learn, JWT, and SQLite. The combined interface is a lightweight web UI; the original support application also includes Streamlit.
+**Core stack:** FastAPI, LlamaIndex, LangGraph, SentenceTransformers, ChromaDB, BM25, PyTorch, scikit-learn, Ollama (local Qwen), JWT, and SQLite. The combined interface is a lightweight web UI; the original support application also includes Streamlit.
 
-[Architecture details](platform/ARCHITECTURE.md) | [Vector diagram](platform/architecture.svg)
+[Architecture details](platform/ARCHITECTURE.md) | [Parent graph details](platform/PARENT_WORKFLOW.md)
+
+[Detailed end-to-end flowcharts](platform/END_TO_END_FLOW.md) cover ingestion, tokenization, embeddings, initial classification, hybrid retrieval, both workflow engines, validation, and browser delivery.
+
+[Parent LangGraph and LlamaIndex orchestration](platform/PARENT_WORKFLOW.md): LangGraph owns classification, support, investigation and final assembly. Qwen can request one additional document lookup through a LlamaIndex subworkflow and reassess with those passages. Empty retrieval or invalid follow-up preserves the original assessment. This is bounded documentation retrieval, not autonomous live debugging or unlimited tool use.
+
+The local launcher now requests **Qwen3 1.7B through local-only Ollama** for incident analysis. Python first parses supplied logs and correlates request IDs; the model returns advisory observations, severity, possible causes, next checks and missing evidence. Schema and evidence-ID validation reject malformed responses, and reported severity cannot be lowered. Simulated tool records are excluded from the model prompt. These checks do not establish semantic correctness. The initial router, classifier and support generation path are unchanged; no ticket or message is automatically sent.
 
 ## ✨ Key Features
 
 - Authentication: JWT-protected requests and user-scoped case history.
 - Routing: explicit domain selection, weighted policies, and a trained classifier with abstention thresholds.
+- Unified intake: existing domain and IT ticket models produce one decision object; support retrieval and drafting reuse the category, priority and hints without another classification pass. This is one intake API, not a newly trained joint model.
 - Retrieval: semantic and BM25 search, metadata filtering, and source-aware reranking.
 - Investigation: five operational domains with preserved logs, events, identity, and service context.
 - Triage: ticket classification, priority, team recommendation, and human-reviewed drafts.
@@ -136,11 +187,13 @@ cd ..
 .venv-api/bin/python run_local.py
 ```
 
-Initial ingestion downloads the embedding model and builds the local index. The API uses offline generation and does not submit external actions. Model downloads require internet access. Dependencies are not fully locked; fresh-environment reproducibility remains a limitation.
+Initial ingestion downloads the embedding model and builds the local index. Support answer generation remains offline. Incident generation via the launcher requires an installed local Ollama runtime and `qwen3:1.7b` already downloaded; the launcher never pulls a model automatically. The configured user-local runtime location is described in [the full flow](platform/END_TO_END_FLOW.md). If a runtime is missing the launcher stops; if model analysis fails the response explicitly says it was unavailable. Set `INCIDENT_ANALYSIS_MODE=offline` to run the original offline-only mode without Ollama. No external actions are submitted automatically. Model downloads require internet access. Dependencies are not fully locked; fresh-environment reproducibility remains a limitation.
 
 Open http://127.0.0.1:8765 and log in with `demo` / `local-demo-only`. This is a local demo account, not production identity management. Keep the server bound to localhost. JWTs expire on server restart. The first support request loads models; later requests reuse the worker.
 
 ## 🧪 Tests and Training
+
+The platform suite passed 141 tests covering local Qwen validation, unified classification intake, parent LangGraph orchestration and bounded LlamaIndex documentation exchange. Two additional support tests verify that supplied intake decisions bypass downstream classifier calls and standalone support classifies once. A real local Qwen request also completed a documentation-search/reassessment round trip on synthetic logs. These are not production diagnostic-quality results.
 
 From `platform/`, with `SUPPORT_PYTHON` set and ingestion complete:
 

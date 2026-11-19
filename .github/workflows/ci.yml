@@ -48,7 +48,11 @@ jobs:
           python -m venv .venv-api
           .venv-api/bin/pip install -r incident/requirements.txt pytest
       - name: Test combined platform
-        run: .venv-api/bin/python -m pytest test_combined.py test_regressions.py test_improvements.py test_university.py test_external_apis.py test_jobs.py test_routing_training.py test_retrieval_evaluation.py test_qlora_protocol.py test_qlora_retraining.py test_llama_training.py test_llama_retraining.py -q
+        run: .venv-api/bin/python -m pytest test_combined.py test_regressions.py test_improvements.py test_university.py test_external_apis.py test_jobs.py test_routing_training.py test_retrieval_evaluation.py test_qlora_protocol.py test_qlora_retraining.py test_llama_training.py test_llama_retraining.py test_local_analysis.py test_intake_classifier.py test_platform_workflow.py -q
 
       - name: Run expanded retrieval evaluation
         run: .venv-support/bin/python retrieval_benchmark.py
+
+      - name: Verify support intake reuse
+        working-directory: platform/support
+        run: ../.venv-support/bin/python -m pytest tests/test_intake_reuse.py -q

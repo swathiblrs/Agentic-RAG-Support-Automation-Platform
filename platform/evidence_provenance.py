@@ -13,7 +13,9 @@ def annotate(report):
     report['evidence']=records
     report['evidence_summary']={name:sum(item['origin']==name for item in records) for name in ['user_supplied','local_simulation','rule_derived']}
     report['evidence_summary']['independently_verified']=0
-    report['assessment_mode']='offline_rules_and_simulation'
+    analysis = report.get('diagnostic_analysis', {})
+    report['assessment_mode']=('local_qwen_advisory_with_simulated_tools'
+                               if analysis.get('status') == 'completed' else 'offline_rules_and_simulation')
     report['semantic_groundedness']='not_evaluated'
     for finding in report.get('findings',[]):
         finding['verification_status']='unverified_offline_assessment'

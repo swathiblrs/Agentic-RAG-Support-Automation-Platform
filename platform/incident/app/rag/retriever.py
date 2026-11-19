@@ -7,6 +7,12 @@ from app.storage.pgvector_store import PgVectorStore
 
 
 class SecurityKnowledgeRetriever:
+    DOMAIN_TAGS = {
+        "production": {"production", "sre"}, "cloud": {"cloud", "infrastructure"},
+        "data": {"data", "pipeline"}, "it": {"it", "vpn", "email", "endpoint"},
+        "security": {"account-takeover", "siem", "T1078", "token-theft", "containment"},
+    }
+
     def __init__(self, knowledge_dir: Path | None = None):
         base_dir = Path(__file__).resolve().parents[1]
         settings = get_settings()
@@ -37,7 +43,7 @@ class SecurityKnowledgeRetriever:
                 return self.pgvector_store.search(query=query, top_k=settings.rag_top_k)
             except Exception:
                 pass
-        return self.store.search(query=query, top_k=settings.rag_top_k)
+        return self.search_domain(query, "security")
 
     def retrieve_for_incident(self, incident: IncidentInput) -> list[RetrievedDocument]:
         settings = get_settings()
@@ -62,4 +68,10 @@ class SecurityKnowledgeRetriever:
                 return self.pgvector_store.search(query=query, top_k=settings.rag_top_k)
             except Exception:
                 pass
-        return self.store.search(query=query, top_k=settings.rag_top_k)
+        return self.search_domain(query, incident.domain.value)
+
+    def search_domain(self, query: str, domain: str) -> list[RetrievedDocument]:
+        allowed = self.DOMAIN_TAGS[domain]
+        candidates = self.store.search(query=query + " " + domain,
+                                       top_k=max(len(self.store.documents), get_settings().rag_top_k))
+        return [item for item in candidates if set(item.tags) & allowed][:get_settings().rag_top_k]

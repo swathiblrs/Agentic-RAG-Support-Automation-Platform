@@ -39,7 +39,7 @@ def classify_ticket(question: str) -> Dict:
     }
 
 
-def classify_for_retrieval(question: str) -> Dict:
+def classify_for_retrieval(question: str, ticket: Dict = None) -> Dict:
     """
     Runs a lightweight early classification pass before RAG retrieval.
 
@@ -47,11 +47,9 @@ def classify_for_retrieval(question: str) -> Dict:
     domain/source area. Final ticket category, priority, and routing are still
     produced later by classify_ticket().
     """
-    question_lower = question.lower()
-    ml_prediction = predict_ticket_torch(question) or predict_ticket_ml(question)
-    rule_category = classify_category_with_rules(question_lower)
-    predicted_category = choose_category(rule_category, ml_prediction)
-    category_confidence = (ml_prediction or {}).get("category_confidence", 0.0)
+    ticket = ticket if ticket is not None else classify_ticket(question)
+    predicted_category = ticket["category"]
+    category_confidence = ticket.get("ml_category_confidence", 0.0)
 
     if predicted_category != "General IT Support":
         category_confidence = max(category_confidence, 0.55)
@@ -65,7 +63,7 @@ def classify_for_retrieval(question: str) -> Dict:
         "retrieval_intents": retrieval_intents if mode == "targeted" else [],
         "retrieval_mode": mode,
         "fallback_reason": "" if mode == "targeted" else "No confident support domain was detected; using broad retrieval.",
-        "model": (ml_prediction or {}).get("model", "rules_only"),
+        "model": ticket.get("ml_model", "rules_only"),
     }
 
 

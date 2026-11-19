@@ -20,6 +20,7 @@ except Exception:
 from src.config import CLARIFY_CONFIDENCE_THRESHOLD, LOW_CONFIDENCE_THRESHOLD
 from src.generator import answer_question
 from src.ticket_classifier import classify_for_retrieval
+from src.ticket_classifier import classify_ticket
 
 
 SUPPORT_SIGNALS = {
@@ -29,7 +30,7 @@ SUPPORT_SIGNALS = {
 }
 
 
-def run_support_workflow(question: str, domain: str = "it_support") -> Dict:
+def run_support_workflow(question: str, domain: str = "it_support", classification: Dict = None) -> Dict:
     """
     Coordinates the support workflow around the RAG answer.
 
@@ -41,32 +42,36 @@ def run_support_workflow(question: str, domain: str = "it_support") -> Dict:
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.run(run_support_workflow_async(question, domain))
+            return asyncio.run(run_support_workflow_async(question, domain, classification))
 
         return run_sequential_support_workflow(
             question,
             domain,
             workflow_engine="llamaindex_workflows_sync_fallback",
+            classification=classification,
         )
 
     return run_sequential_support_workflow(
         question,
         domain,
         workflow_engine="llamaindex_workflows_compatible_fallback",
+        classification=classification,
     )
 
 
-async def run_support_workflow_async(question: str, domain: str = "it_support") -> Dict:
+async def run_support_workflow_async(question: str, domain: str = "it_support", classification: Dict = None) -> Dict:
     workflow = SupportAutomationWorkflow(timeout=30, verbose=False)
-    return await workflow.run(question=question, domain=domain)
+    return await workflow.run(question=question, domain=domain, classification=classification)
 
 
 def run_sequential_support_workflow(
     question: str,
     domain: str,
     workflow_engine: str,
+    classification: Dict = None,
 ) -> Dict:
     state = build_initial_state(question, domain)
+    state["_intake_classification"] = classification
     state["workflow_engine"] = workflow_engine
 
     workflow_start = perf_counter()
@@ -93,6 +98,7 @@ if LLAMA_INDEX_WORKFLOWS_AVAILABLE:
         @step
         async def generate_answer(self, ev: StartEvent) -> AnswerGeneratedEvent:
             state = build_initial_state(ev.question, ev.domain)
+            state["_intake_classification"] = ev.get("classification", None)
             state["workflow_engine"] = "llamaindex_workflows"
             state["_workflow_start"] = perf_counter()
             run_preclassification_stage(state)
@@ -134,7 +140,17 @@ else:
 
 def run_preclassification_stage(state: Dict) -> None:
     start = perf_counter()
-    state["preliminary_classification"] = classify_for_retrieval(state.get("question", ""))
+    classification = state.pop("_intake_classification", None)
+    supplied = classification is not None
+    if classification is None:
+        ticket = classify_ticket(state.get("question", ""))
+        classification = {
+            "ticket": ticket,
+            "preliminary_classification": classify_for_retrieval(state.get("question", ""), ticket),
+        }
+    state["ticket"] = dict(classification["ticket"])
+    state["preliminary_classification"] = dict(classification["preliminary_classification"])
+    state["classification_origin"] = "unified_intake" if supplied else "support"
     record_stage_latency(state, "preclassification_stage_latency_ms", start)
 
 
@@ -146,6 +162,7 @@ def run_answer_stage(state: Dict) -> None:
         question,
         domain=domain,
         preliminary_classification=state.get("preliminary_classification", {}),
+        ticket_classification=state["ticket"],
     )
     state.update(
         {

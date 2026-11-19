@@ -38,8 +38,12 @@ a{color:#086a60}.command{margin-top:16px}.toolbar{display:flex;align-items:cente
 <label for="logs">Logs (optional)</label><textarea id="logs"></textarea><button id="submit" class="command">Submit case</button>
 </form>
 <p id="jobStatus" class="status" role="status"></p>
-<section id="result" hidden><h2 id="route"></h2><p id="answer"></p><p id="evidenceOrigin" class="status"></p>
-<h2>Ticket draft</h2><pre id="ticket"></pre>
+<section id="result" hidden><h2 id="route"></h2><p id="answer"></p><p id="routeCheck" class="status"></p><p id="evidenceOrigin" class="status"></p>
+<section id="diagnostics" hidden><h2>Incident analysis</h2><p id="analysisStatus" class="status"></p>
+<div id="analysisSummary"></div><details><summary>Parsed evidence and model response</summary><pre id="analysis"></pre></details></section>
+<details><summary>Ticket draft</summary><pre id="ticket"></pre></details>
+<details id="documentationExchange" hidden><summary>Additional documentation lookup</summary><pre id="documentationResult"></pre></details>
+<details><summary>Workflow steps</summary><ol id="workflowSteps"></ol></details>
 <details><summary>Investigation and sources</summary><pre id="evidence"></pre></details>
 <details><summary>Complete response</summary><pre id="raw"></pre></details></section>
 <section><h2>Recent jobs</h2><ul id="jobs" class="items"></ul></section>
@@ -62,10 +66,48 @@ function showResult(data){
   $('result').hidden=false;
   $('route').textContent=data.routing.path+' / '+(data.routing.domain||'needs clarification');
   $('answer').textContent=data.answer;
+  $('workflowSteps').replaceChildren();
+  for(const entry of data.execution_trace||[]){
+    const row=document.createElement('li');row.textContent=entry;$('workflowSteps').append(row);
+  }
+  $('documentationExchange').hidden=!data.documentation_exchange;
+  $('documentationResult').textContent=data.documentation_exchange?JSON.stringify(data.documentation_exchange,null,2):'';
+  const analysis=data.investigation?.diagnostic_analysis;
+  $('diagnostics').hidden=!analysis||!Object.keys(analysis).length;
+  $('analysis').textContent=analysis?JSON.stringify(analysis,null,2):'';
+  $('analysisSummary').replaceChildren();
+  $('analysisStatus').textContent=analysis?.status==='completed'
+    ?'Local Qwen assessment. Suggested severity: '+analysis.effective_severity+'. Unverified; human review required.'
+    :(analysis?.reason||'');
+  if(analysis?.status==='completed'){
+    for(const [label,items] of [
+      ['Observations',analysis.assessment.observations],
+      ['Possible causes (not confirmed)',analysis.assessment.possible_causes],
+      ['Next checks',analysis.assessment.next_steps],
+      ['Missing evidence',analysis.assessment.missing_evidence]
+    ]){
+      const heading=document.createElement('h3');heading.textContent=label;
+      const list=document.createElement('ul');
+      for(const item of items){
+        const row=document.createElement('li');
+        row.textContent=typeof item==='string'?item:item.text+' ['+item.evidence_ids.join(', ')+']';
+        list.append(row);
+      }
+      if(!items.length){const row=document.createElement('li');row.textContent='None reported.';list.append(row)}
+      $('analysisSummary').append(heading,list);
+    }
+  }
+  const check=data.route_verification;
+  const initial=data.initial_routing?.domain;
+  $('routeCheck').textContent=check&&check.status!=='not_run'
+    ? (initial?'Rerouted from '+initial+' to '+data.routing.domain+'. ':'')+check.reason
+      +(check.review_required?' Review the suggested team before using the draft.':'')
+    : '';
   const origins=data.investigation?.evidence_summary;
   $('evidenceOrigin').textContent=origins?'Unverified assessment. Evidence: '+origins.user_supplied+' user-supplied, '+origins.local_simulation+' simulated, '+origins.rule_derived+' rule-derived.':'';
   $('ticket').textContent=JSON.stringify(data.ticket_draft,null,2);
-  $('evidence').textContent=JSON.stringify(data.investigation||data.support,null,2);
+  $('evidence').textContent=JSON.stringify({support:data.support,investigation:data.investigation,
+    ...(data.previous_investigation?{previous_investigation:data.previous_investigation}:{})},null,2);
   $('raw').textContent=JSON.stringify(data,null,2);
 }
 function button(label,action,secondary=false){

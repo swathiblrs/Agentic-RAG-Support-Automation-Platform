@@ -45,14 +45,27 @@ class SupportWorker:
             self.process.stdout.close()
         self.process = None
 
-    def call(self, question):
+    def call(self, question, classification=None):
+        payload = {'question': question, 'operation': 'support'}
+        if classification is not None:
+            payload['classification'] = classification
+        return self._request(payload)
+
+    def classify(self, question):
+        return self._request({'question': question, 'operation': 'classify'})
+
+    def retrieve(self, query, domain, runbooks, include_support=False):
+        return self._request({'operation': 'retrieve', 'query': query, 'domain': domain,
+                              'runbooks': runbooks, 'include_support': include_support})
+
+    def _request(self, payload):
         if not self.lock.acquire(timeout=120):
             raise RuntimeError('Support worker busy')
         try:
             if not self.process or self.process.poll() is not None:
                 self._stop()
                 self._start()
-            self.process.stdin.write(json.dumps({'question': question}) + '\n')
+            self.process.stdin.write(json.dumps(payload) + '\n')
             self.process.stdin.flush()
             line = self.responses.get(timeout=120)
             if line is None:

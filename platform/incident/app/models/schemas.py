@@ -189,6 +189,7 @@ class InvestigationReport(BaseModel):
     evidence: list[EvidenceItem]
     recommended_actions: list[RemediationStep]
     references: list[RetrievedDocument]
+    diagnostic_analysis: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -203,6 +204,7 @@ class IncidentReport(BaseModel):
     evidence: list[EvidenceItem]
     recommended_actions: list[RemediationStep]
     references: list[RetrievedDocument]
+    diagnostic_analysis: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
