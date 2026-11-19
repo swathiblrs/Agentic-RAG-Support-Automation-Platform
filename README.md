@@ -8,46 +8,32 @@ This project helps IT support teams answer repeated questions, find relevant doc
 
 ## 🏗️ System Architecture
 
-The main diagram shows the complete request flow. The next two diagrams detail the components managed by LangGraph. Main classification runs before orchestration.
+The main diagram shows the two-component architecture. The next two diagrams expand each component's internal steps. Main classification runs before LangGraph.
 
 ### Main Architecture
 
 ```mermaid
 flowchart TD
-    User["Browser: sign in and submit request"] --> API["FastAPI: JWT and input validation"]
-    API --> Queue["SQLite queue: HTTP 202 and job ID"]
-    Queue --> Worker["Background worker"]
-    Worker --> Classifier["Main classification: domain and ticket details"]
+    User["User request"] --> API["FastAPI and background jobs"]
+    API --> Classifier["Main classification"]
     subgraph Parent["LANGGRAPH ORCHESTRATOR"]
-        Select{"Select workflow"}
-        subgraph LI["LlamaIndex components"]
-            Support["Routine support RAG"]
-            Lookup["Requested documentation retrieval"]
-        end
-        Investigation["Incident analysis: Python evidence parsing and local Qwen"]
-        Verify["Verify route and preserve evidence"]
-        Need{"Documentation gap?"}
-        Refine["Qwen reassesses once with returned passages"]
-        Final["Finalize answer and suggested ticket"]
-        Select -->|"Support"| Support
-        Select -->|"Incident"| Investigation
+        Select["Coordinate request"]
+        LI["LlamaIndex: RAG and routine support"]
+        Qwen["Qwen investigation: parsed logs and evidence analysis"]
+        Final["Assemble final result"]
+        Select -->|"Support"| LI
+        Select -->|"Investigation"| Qwen
         Select -->|"Clarification"| Final
-        Support -->|"Routine"| Verify
-        Support -->|"IT incident"| Investigation
-        Investigation --> Verify
-        Verify --> Need
-        Need -->|"One lookup maximum"| Lookup
-        Lookup -->|"Documents found"| Refine
-        Lookup -->|"Empty or failed"| Final
-        Refine --> Final
-        Need -->|"No"| Final
+        Qwen -->|"Request documentation"| LI
+        LI -->|"Return requested context"| Qwen
+        LI -->|"Support result"| Final
+        Qwen -->|"Investigation result"| Final
     end
     Classifier --> Select
-    Final --> Saved["Persist case, job event and in-app notification"]
-    Saved --> Display["Browser polls and displays result for review"]
+    Final --> Display["Save result and display it in the browser"]
 ```
 
-Route verification can trigger one alternate-domain investigation; that recovery edge is omitted from this overview for readability. No external team notification, ticket submission or remediation is automatic.
+LangGraph controls all calls between these two components. The arrows show permitted interactions, not an unlimited loop: Qwen can request at most one follow-up documentation lookup. Validation, route verification and failure handling are shown in the detailed flows below. The investigation model is currently pretrained; incident-specific fine-tuning is future work. No external team notification, ticket submission or remediation is automatic.
 
 ### LlamaIndex Support Flow
 
