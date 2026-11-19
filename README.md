@@ -35,7 +35,7 @@ flowchart TD
 
 LangGraph controls all calls between these two components. The arrows show permitted interactions, not an unlimited loop: Qwen can request at most one follow-up documentation lookup. Validation, route verification and failure handling are shown in the detailed flows below. The investigation model is currently pretrained; incident-specific fine-tuning is future work. No external team notification, ticket submission or remediation is automatic.
 
-### LlamaIndex Support Flow
+### LlamaIndex Support Flow with RAG pipeline
 
 ```mermaid
 flowchart TD
