@@ -10,49 +10,46 @@ This project helps IT support teams answer repeated questions, find relevant doc
 
 ```mermaid
 flowchart TD
-    User["Browser: sign in and submit issue / logs"] --> API["FastAPI: JWT and input validation"]
-    API --> Queue[("SQLite job queue")]
-    API --> Accepted["HTTP 202 + job ID"]
-    Queue --> Worker["Persistent background worker"]
-    subgraph Parent["Parent LangGraph orchestration"]
-        Intake["Unified intake: domain policy + existing ML / ticket models"]
+    User["Browser"] --> API["FastAPI: authentication and job submission"]
+    API --> Worker["SQLite queue and background worker"]
+    subgraph Parent["LANGGRAPH - TOP-LEVEL ORCHESTRATOR"]
+        Intake["Unified classification"]
         Choice{"Support or investigation?"}
-        Support["LlamaIndex support workflow"]
-        Incident["Incident LangGraph: parse logs and collect evidence"]
-        Qwen["Local Qwen: advisory incident analysis"]
-        Verify["Verify route against supplied telemetry"]
-        Gap{"Qwen requests more documentation?"}
-        Docs["LlamaIndex document lookup"]
-        Reassess["Qwen reassessment: one follow-up round maximum"]
-        Final["Compose answer, suggested team and ticket draft"]
+        subgraph LlamaIndex["LlamaIndex components INSIDE LangGraph"]
+            Support["Support RAG and provisional draft"]
+            Docs["Requested documentation lookup"]
+        end
+        subgraph Investigation["Incident investigation subgraph"]
+            Incident["Parse logs and collect evidence"]
+            Qwen["Local Qwen analysis"]
+            Incident --> Qwen
+        end
+        Verify["Route verification"]
+        Gap{"More documentation needed?"}
+        Reassess["Qwen reassessment"]
+        Final["Final answer and suggested ticket"]
         Intake --> Choice
-        Choice -->|"Routine support"| Support
+        Choice -->|"Support context"| Support
         Choice -->|"Incident"| Incident
         Choice -->|"Unclear"| Final
         Support -->|"Routine"| Verify
         Support -->|"IT incident"| Incident
-        Incident --> Qwen
         Qwen --> Verify
-        Verify -->|"One automatic reroute allowed"| Incident
-        Verify -->|"No reroute"| Gap
-        Gap -->|"Yes"| Docs
-        Docs -->|"Passages found"| Reassess
-        Docs -->|"Empty or unavailable"| Final
+        Verify --> Gap
+        Gap -->|"One lookup maximum"| Docs
+        Docs -->|"Documents"| Reassess
+        Docs -->|"No result"| Final
         Reassess --> Final
         Gap -->|"No"| Final
     end
     Worker --> Intake
-    KB["Support documents: MiniLM vectors + ChromaDB + BM25"] --> Support
-    Runbooks["Domain-scoped incident runbooks"] --> Incident
-    KB --> Docs
-    Runbooks --> Docs
-    Final --> Saved[("Saved case + job event + in-app notification")]
-    Accepted --> Poll["Authenticated browser polling"]
-    Saved --> Poll
-    Poll --> Display["Display findings and draft for human review"]
+    Final --> Saved["Save case, job status and in-app notification"]
+    Saved --> Display["Browser polls and displays result"]
 ```
 
-Routine requests do not call Qwen. A reroute to IT can first run support if needed; an unavailable model, empty lookup or invalid follow-up is explicitly reported. Additional documentation is guidance, not proof of an incident. No ticket submission, team message or remediation is automatic.
+**LlamaIndex is inside the parent LangGraph, not a separate top-level orchestrator.** Its support workflow and documentation lookup are called by LangGraph nodes. The incident workflow is another component inside that same parent graph.
+
+This overview omits recovery edges for readability: route verification can trigger one alternate-domain investigation, with support first if needed for IT. FastAPI returns HTTP 202 and a job ID; the browser polls for completion. Routine requests do not call Qwen. Unavailable models, empty lookup and invalid follow-up are reported explicitly. Additional documents are guidance, not proof. No ticket submission, external team message or remediation is automatic. See the [exact parent graph](platform/PARENT_WORKFLOW.md) for all transitions.
 
 **High-level workflow**
 
