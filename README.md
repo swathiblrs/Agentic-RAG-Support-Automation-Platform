@@ -1,4 +1,4 @@
-# 🤖 Enterprise Agentic RAG Support Automation Platform
+# 🤖 Agentic RAG Support Automation Platform
 
 An enterprise IT support prototype using public knowledge-base guidance for source-backed answers, support triage, and incident investigation, built with FastAPI, LlamaIndex, LangGraph, and ML-based routing.
 
