@@ -8,7 +8,46 @@ This project helps IT support teams answer repeated questions, find relevant doc
 
 ## 🏗️ System Architecture
 
-The two diagrams below show separate components managed by the same LangGraph orchestrator. Main classification runs before either component.
+The main diagram shows the complete request flow. The next two diagrams detail the components managed by LangGraph. Main classification runs before orchestration.
+
+### Main Architecture
+
+```mermaid
+flowchart TD
+    User["Browser: sign in and submit request"] --> API["FastAPI: JWT and input validation"]
+    API --> Queue["SQLite queue: HTTP 202 and job ID"]
+    Queue --> Worker["Background worker"]
+    Worker --> Classifier["Main classification: domain and ticket details"]
+    subgraph Parent["LANGGRAPH ORCHESTRATOR"]
+        Select{"Select workflow"}
+        subgraph LI["LlamaIndex components"]
+            Support["Routine support RAG"]
+            Lookup["Requested documentation retrieval"]
+        end
+        Investigation["Incident analysis: Python evidence parsing and local Qwen"]
+        Verify["Verify route and preserve evidence"]
+        Need{"Documentation gap?"}
+        Refine["Qwen reassesses once with returned passages"]
+        Final["Finalize answer and suggested ticket"]
+        Select -->|"Support"| Support
+        Select -->|"Incident"| Investigation
+        Select -->|"Clarification"| Final
+        Support -->|"Routine"| Verify
+        Support -->|"IT incident"| Investigation
+        Investigation --> Verify
+        Verify --> Need
+        Need -->|"One lookup maximum"| Lookup
+        Lookup -->|"Documents found"| Refine
+        Lookup -->|"Empty or failed"| Final
+        Refine --> Final
+        Need -->|"No"| Final
+    end
+    Classifier --> Select
+    Final --> Saved["Persist case, job event and in-app notification"]
+    Saved --> Display["Browser polls and displays result for review"]
+```
+
+Route verification can trigger one alternate-domain investigation; that recovery edge is omitted from this overview for readability. No external team notification, ticket submission or remediation is automatic.
 
 ### LlamaIndex Support Flow
 
