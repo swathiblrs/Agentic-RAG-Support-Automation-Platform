@@ -55,4 +55,4 @@ jobs:
 
       - name: Verify support intake reuse
         working-directory: platform/support
-        run: ../.venv-support/bin/python -m pytest tests/test_intake_reuse.py -q
+        run: ../.venv-support/bin/python -m pytest tests/test_intake_reuse.py tests/test_support_generation.py -q

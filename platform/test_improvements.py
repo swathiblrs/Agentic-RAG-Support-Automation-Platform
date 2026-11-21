@@ -82,15 +82,15 @@ def test_supplied_evidence_can_reroute_once_and_preserve_initial_output(monkeypa
         'answer': 'VPN guidance', 'ticket_draft': {'assigned_team': 'Network Support', 'priority': 'Low'},
     })
     result = c.execute(request)
-    assert calls == ['it', 'security']
-    assert result['initial_routing']['domain'] == 'it'
-    assert result['routing']['domain'] == 'security'
-    assert result['route_verification']['status'] == 'rerouted'
-    assert result['previous_investigation']['investigation_id'] == 'it'
-    assert result['investigation']['investigation_id'] == 'security'
-    assert result['answer'] == 'security findings'
+    assert calls == ['it', 'it']
+    assert result['previous_attempt']['routing']['domain'] == 'it'
+    assert result['routing']['domain'] == 'it'
+    assert result['route_verification']['status'] == 'review'
+    assert result['verification_retry']['reruns'] == 1
+    assert result['investigation']['investigation_id'] == 'it'
+    assert result['answer'] == 'it findings'
     assert result['support']['answer'] == 'VPN guidance'
-    assert result['ticket_draft']['assigned_team'] == 'SOC'
+    assert result['ticket_draft']['assigned_team'] == 'Network Support'
     assert result['ticket_draft']['next_action'] == 'human_review_before_submission'
 
 
@@ -135,7 +135,7 @@ def test_second_workflow_disagreement_stops_for_review(monkeypatch):
 
     monkeypatch.setattr(c, 'investigate', investigate)
     result = c.execute(request)
-    assert calls == ['production', 'cloud']
-    assert result['route_verification']['rerouted']
+    assert calls == ['production', 'production']
+    assert result['verification_retry']['reruns'] == 1
     assert result['route_verification']['status'] == 'review'
     assert result['route_verification']['review_required']

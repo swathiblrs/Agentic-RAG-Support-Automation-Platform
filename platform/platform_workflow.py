@@ -22,7 +22,7 @@ class PlatformWorkflow:
     def __init__(self, services):
         self.services = services
         graph = StateGraph(PlatformState)
-        for name in ("initialize", "support", "investigate", "verify", "reroute",
+        for name in ("initialize", "support", "investigate", "verify",
                      "retrieve_documentation", "refine_analysis", "finalize"):
             graph.add_node(name, getattr(self, name))
         graph.add_edge(START, "initialize")
@@ -32,10 +32,8 @@ class PlatformWorkflow:
                                     {"investigate": "investigate", "verify": "verify"})
         graph.add_edge("investigate", "verify")
         graph.add_conditional_edges("verify", self.after_verification,
-                                    {"reroute": "reroute", "retrieve_documentation": "retrieve_documentation",
+                                    {"retrieve_documentation": "retrieve_documentation",
                                      "finalize": "finalize"})
-        graph.add_conditional_edges("reroute", self.after_reroute,
-                                    {"support": "support", "investigate": "investigate"})
         graph.add_conditional_edges("retrieve_documentation",
                                     lambda s: "refine_analysis" if s["documents"] else "finalize",
                                     {"refine_analysis": "refine_analysis", "finalize": "finalize"})
@@ -109,27 +107,11 @@ class PlatformWorkflow:
         return analysis.get("assessment", {}).get("documentation_query", "").strip()
 
     def after_verification(self, state):
-        if state["result"]["route_verification"]["status"] == "alternate" and not state["reroutes"]:
-            return "reroute"
+        if state["result"]["route_verification"]["status"] in ("alternate", "review"):
+            return "finalize"
         if self.documentation_query(state):
             return "retrieve_documentation"
         return "finalize"
-
-    def reroute(self, state):
-        result = state["result"]
-        previous = result["routing"]
-        domain = result["route_verification"]["suggested_domain"]
-        result.update(initial_routing=previous, previous_investigation=state["report"])
-        result["routing"] = {"domain": domain, "path": "investigate", "routing_mode": "evidence_reroute",
-                             "support_context": bool(result["support"]) or domain == "it",
-                             "reason": result["route_verification"]["reason"]}
-        result["execution_trace"].append(f"Route verification: {previous['domain']} -> {domain} (one reroute allowed)")
-        return {"result": result, "report": None, "reroutes": 1}
-
-    @staticmethod
-    def after_reroute(state):
-        result = state["result"]
-        return "support" if result["routing"]["domain"] == "it" and result["support"] is None else "investigate"
 
     def retrieve_documentation(self, state):
         result = state["result"]

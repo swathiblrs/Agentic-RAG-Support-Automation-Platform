@@ -8,6 +8,8 @@ This project helps IT support teams answer repeated questions, find relevant doc
 
 ## 🏗️ System Architecture
 
+**Verification retry:** after a domain mismatch, the coordinator reruns the complete case from the main classifier exactly once. It does not force the verifier's alternate domain. If the second attempt remains unverified or mismatched, the browser displays a classification-mismatch review warning and preserves the first attempt's findings. Missing evidence alone does not trigger a retry. This replaces the earlier alternate-domain reroute shown in historical workflow notes. Queue-level recovery retries remain separate from this one logical verification retry.
+
 The main diagram shows the two-component architecture. The next two diagrams expand each component's internal steps. Main classification runs before LangGraph.
 
 ### Main Architecture
@@ -15,7 +17,7 @@ The main diagram shows the two-component architecture. The next two diagrams exp
 ```mermaid
 flowchart TD
     User["User request"] --> API["FastAPI and background jobs"]
-    API --> Classifier["Main classification"]
+    API --> Classifier["Main classification: fine-tuned Qwen3-0.6B"]
     subgraph Parent["LANGGRAPH ORCHESTRATOR"]
         Select["Coordinate request"]
         LI["LlamaIndex: RAG and routine support"]
@@ -115,6 +117,8 @@ The local launcher now requests **Qwen3 1.7B through local-only Ollama** for inc
 
 ## ✨ Key Features
 
+Support answers are local-only: the unused LangChain/OpenAI support-generation branch and its settings/dependencies have been removed. The separately confirmed OpenAI API adapter remains available.
+
 - Authentication: JWT-protected requests and user-scoped case history.
 - Routing: explicit domain selection, weighted policies, and a trained classifier with abstention thresholds.
 - Unified intake: existing domain and IT ticket models produce one decision object; support retrieval and drafting reuse the category, priority and hints without another classification pass. This is one intake API, not a newly trained joint model.
@@ -131,7 +135,7 @@ The local launcher now requests **Qwen3 1.7B through local-only Ollama** for inc
 
 Compared TF-IDF, frozen MiniLM, and SetFit-fine-tuned MiniLM on **1,800 synthetic rows** representing 720 scenarios in disjoint topic-family splits. Model and confidence thresholds were selected on validation before opening the final test.
 
-The selected **frozen MiniLM + trained classifier** achieved **96.67% accuracy and 96.57% macro-F1 on 90 final-test cases**. Its accepted coverage was 96.67%, with 97.70% accuracy among accepted predictions. SetFit was trained and evaluated but did not outperform this validation winner. These generated labels remain awaiting independent human review.
+The earlier validation-selected **frozen MiniLM + trained classifier** achieved **96.67% accuracy and 96.57% macro-F1 on 90 final-test cases**. Its accepted coverage was 96.67%, with 97.70% accuracy among accepted predictions. SetFit was trained and evaluated but did not outperform this validation winner. MiniLM remains available in compatibility routing mode and for retrieval embeddings. These generated labels remain awaiting independent human review.
 
 [Training protocol and comparison](platform/routing_training/README.md) | [Model card](platform/MODEL_CARD.md). The routing encoder is separate from retrieval embeddings, and the original retrieval encoder and index are retained. Earlier routing metrics below use a different historical dataset.
 
@@ -139,7 +143,11 @@ The selected **frozen MiniLM + trained classifier** achieved **96.67% accuracy a
 
 Completed Qwen3-0.6B domain-classifier training with rank-16 NF4 QLoRA. The second run achieved **95.83% accuracy and 95.82% macro-F1 on 120 synthetic benchmark cases**, versus 86.67% accuracy for the first adapter on those same cases. Security recall was 100% on 20 synthetic security cases, but cloud/production recall fell to 90%. These are small unreviewed synthetic benchmarks, not production guarantees.
 
-The second run completed **300 steps in 15.2 minutes** on a Colab T4, training 4.59 million parameters with **1.69 GiB peak allocated GPU memory**. Classification p95 was **791 ms**, not end-to-end RAG latency. The active application router remains unchanged.
+The second run completed **300 steps in 15.2 minutes** on a Colab T4, training 4.59 million parameters with **1.69 GiB peak allocated GPU memory**. Classification p95 was **791 ms**, not end-to-end RAG latency and not local Mac latency.
+
+The application selects the **fine-tuned Qwen3-0.6B v2 adapter as the primary domain classifier**, before LangGraph. It retains the six-candidate likelihood scorer and development-selected temperature/thresholds. Explicit domain selection and the security policy remain authoritative; uncertain predictions ask for clarification. Missing/unavailable Qwen falls back to the existing policy/MiniLM router with `classifier_fallback_used=true`. Set `DOMAIN_CLASSIFIER=minilm` for compatibility mode.
+
+Local classifier serving uses float32 on CPU, not the Colab NF4 runtime, so historical accuracy and latency must not be assumed unchanged. This classifier is separate from the **pretrained Qwen3-1.7B incident-analysis model served by Ollama**. The existing IT category/priority model still runs once where applicable; domain-only fine-tuning did not train those outputs. [Local classifier setup](platform/QWEN_CLASSIFIER.md).
 
 [Verified Qwen v2 results](platform/qlora_training/llama_training/qwen_v2_reference/RESULTS.md) | [Training evidence](platform/qlora_training/llama_training/qwen_v2_reference/training.json) | [Qwen training protocol](platform/qlora_training/retraining_v2/README.md)
 
@@ -159,7 +167,7 @@ A second Llama experiment is **prepared, not yet trained**. It keeps the data un
 
 The rows above use the same 120-case synthetic benchmark, already inspected during development. They are not independent production evaluations. Planned retraining improvements are hypotheses, not achieved metrics.
 
-[Second Llama notebook and protocol](platform/qlora_training/llama_retraining/README.md). Public checkpoint downloads explicitly use `token=False`; Meta's license still applies. No model weights or GPU packages are downloaded to the Mac during preparation. The live router remains unchanged; no production endpoint or arbiter is claimed.
+[Second Llama notebook and protocol](platform/qlora_training/llama_retraining/README.md). Public checkpoint downloads explicitly use `token=False`; Meta's license still applies. No Llama model weights or GPU packages are downloaded to the Mac during notebook preparation. No production endpoint or arbiter is claimed.
 
 To resume retraining, upload [Llama_Retraining_NoToken.ipynb](platform/qlora_training/llama_retraining/Llama_Retraining_NoToken.ipynb) to a hosted Colab T4 runtime and use the locally prepared `llama_retraining_bundle.zip`. No Hugging Face token is required. The bundle and trained adapters are deliberately not committed; rebuilding the bundle requires your original `llama_qlora_results.zip` plus the checked-in code and data. Download `llama_retrained_results.zip` after the run and verify it before publishing new metrics.
 

@@ -29,7 +29,7 @@ High-level workflow:
 User support question or uploaded document  
 ➡️ LlamaIndex Workflows-based orchestration  
 ➡️ RAG pipeline retrieves relevant knowledge-base chunks from ChromaDB and BM25  
-➡️ LangChain-powered grounded generation or offline fallback  
+➡️ Local source-backed answer composition<br>
 ➡️ Structured support response with sources, priority, routing, confidence, and ticket draft
 
 Core stack:
@@ -42,7 +42,7 @@ Core stack:
 - SentenceTransformers for embeddings
 - PyTorch multi-task ticket classifier with shared layers, category head, and priority head
 - TF-IDF + Logistic Regression baseline for supervised NLP comparison
-- LangChain / OpenAI for optional grounded LLM generation
+- Local retrieved-text and template answer composition
 - SQLite + JSONL logs for persistence and observability
 - Mock or webhook-based ITSM and chat integrations
 - Docker for containerization
@@ -64,7 +64,7 @@ Core stack:
 - Coordinate retrieval, answer generation, ticket intelligence, and escalation decisions
 - Use LlamaIndex Workflows to run staged support automation orchestration
 - Track confidence and detect low-confidence cases
-- Use LangChain-powered grounded generation when LLM access is enabled
+- Compose support answers locally from retrieved context
 - Fall back to deterministic offline answers for local testing
 
 📊 Analytics and Evaluation
@@ -96,7 +96,7 @@ src/
  ├── persistence.py          # SQLite persistence for logs, feedback, and ticket drafts
  ├── orchestrator.py         # LlamaIndex Workflows orchestration and decisions
  ├── retriever.py            # Hybrid retrieval with ChromaDB + BM25
- ├── generator.py            # LangChain LLM generation + offline fallback
+ ├── generator.py            # Local retrieved-text and template answers
  ├── ticket_classifier.py    # Hybrid ML/rule category, priority, and routing logic
  ├── ml_ticket_model.py      # TF-IDF + Logistic Regression NLP ticket models
  ├── torch_ticket_model.py   # PyTorch multi-task ticket classifier
@@ -183,15 +183,7 @@ The generator uses retrieved chunks to produce an answer.
 
 By default, the project uses deterministic rule-based generation so it can run locally without external API access.
 
-To enable LLM-based grounded generation:
-
-```env
-USE_LLM_GENERATION=true
-OPENAI_API_KEY=your_api_key
-LLM_MODEL_NAME=gpt-4o-mini
-```
-
-The LLM prompt instructs the model to answer only from retrieved context and cite source files.
+Support answer composition is local-only. It uses retrieved public guidance or deterministic templates, and does not call LangChain or OpenAI. The combined platform's separately confirmed OpenAI adapter is independent of this support pipeline.
 
 ### 5. LlamaIndex Workflows Orchestration
 
@@ -715,4 +707,4 @@ Duo MFA app stopped sending push requests.
 
 ## 🙌 Acknowledgements
 
-Built using FastAPI, Streamlit, LlamaIndex Workflows, LangChain, ChromaDB, BM25, Docker, and Kubernetes manifests, and extended into a real-world enterprise IT support automation use case.
+Built using FastAPI, Streamlit, LlamaIndex Workflows, ChromaDB, BM25, Docker, and Kubernetes manifests, and extended into an enterprise IT support automation use case.

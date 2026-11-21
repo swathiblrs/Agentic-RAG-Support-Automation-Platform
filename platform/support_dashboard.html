@@ -98,8 +98,9 @@ function showResult(data){
     }
   }
   const check=data.route_verification;
+  const mismatch=data.classification_mismatch;
   const initial=data.initial_routing?.domain;
-  $('routeCheck').textContent=check&&check.status!=='not_run'
+  $('routeCheck').textContent=mismatch?.review_required?mismatch.message:check&&check.status!=='not_run'
     ? (initial?'Rerouted from '+initial+' to '+data.routing.domain+'. ':'')+check.reason
       +(check.review_required?' Review the suggested team before using the draft.':'')
     : '';
@@ -107,6 +108,7 @@ function showResult(data){
   $('evidenceOrigin').textContent=origins?'Unverified assessment. Evidence: '+origins.user_supplied+' user-supplied, '+origins.local_simulation+' simulated, '+origins.rule_derived+' rule-derived.':'';
   $('ticket').textContent=JSON.stringify(data.ticket_draft,null,2);
   $('evidence').textContent=JSON.stringify({support:data.support,investigation:data.investigation,
+    ...(data.previous_attempt?{previous_attempt:data.previous_attempt}:{}),
     ...(data.previous_investigation?{previous_investigation:data.previous_investigation}:{})},null,2);
   $('raw').textContent=JSON.stringify(data,null,2);
 }

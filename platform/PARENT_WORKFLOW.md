@@ -26,7 +26,7 @@ flowchart TD
 ## Responsibility Boundaries
 
 - `platform_workflow.py`: parent state graph and conditional edges. Shared state carries the request, precomputed classification/result, provisional report, reroute count, retrieved documents and start time. Initialization only consumes classification.
-- `intake_classifier.py`: the main classification stage before the graph, using unchanged models and domain policy. IT details and retrieval hints are computed once and reused downstream. QLoRA remains a domain-classification experiment; the generative investigation model is pretrained.
+- `intake_classifier.py`: the main classification stage before the graph. The launcher now selects the trained Qwen3-0.6B v2 adapter through `qwen_classifier.py`, with explicit/security safeguards and visible policy/MiniLM fallback. IT details and retrieval hints are computed once and reused downstream. The generative investigation model remains separately pretrained. See [classifier setup](QWEN_CLASSIFIER.md).
 - `support/src/orchestrator.py`: LlamaIndex support subworkflow. It uses the precomputed ticket decision, hybrid support retrieval, offline support answer composition, confidence checks and draft preparation.
 - Incident LangGraphs: parse logs/events, retrieve initial runbooks, run local domain handlers and optional live local Qwen synthesis. They are nested calls beneath the parent investigation node.
 - `support/src/documentation_workflow.py`: an actual LlamaIndex event workflow that returns selected incident runbook candidates plus support retrieval where IT context applies. It does not run ticket classification or generate an answer again.

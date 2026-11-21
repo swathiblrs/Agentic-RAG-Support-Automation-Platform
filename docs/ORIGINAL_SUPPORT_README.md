@@ -1,5 +1,7 @@
 # 🤖 Enterprise Agentic RAG Support Automation Platform
 
+> Historical documentation snapshot. The optional LangChain/OpenAI support-generation branch described below has been removed from current support code. See the root README for the current architecture. The separate opt-in OpenAI adapter is unaffected.
+
 A production-ready AI agent that helps enterprise IT and support teams answer, triage, route, and respond to support issues using LlamaIndex Workflows-based orchestration + Retrieval-Augmented Generation (RAG).
 
 ## 🌟 Why This Project Exists

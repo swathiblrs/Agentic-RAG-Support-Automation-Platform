@@ -18,7 +18,7 @@ class SupportWorker:
         self.responses = None
 
     def _start(self):
-        env = dict(os.environ, USE_LLM_GENERATION='false', OPENAI_API_KEY='', HF_HUB_OFFLINE='1',
+        env = dict(os.environ, HF_HUB_OFFLINE='1',
                    TRANSFORMERS_OFFLINE='1', TOKENIZERS_PARALLELISM='false', ITSM_INTEGRATION_MODE='disabled', CHAT_INTEGRATION_MODE='disabled')
         self.responses = queue.Queue()
         self.process = subprocess.Popen([PYTHON, '-u', str(ROOT / 'support_worker.py')], stdin=subprocess.PIPE,
@@ -86,4 +86,3 @@ class SupportWorker:
 
 worker = SupportWorker()
 atexit.register(worker.close)
-

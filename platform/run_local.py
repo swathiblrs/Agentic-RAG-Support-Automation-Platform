@@ -14,6 +14,7 @@ def main():
     processes = []
     root = Path(__file__).parent
     env = dict(os.environ)
+    env.setdefault("DOMAIN_CLASSIFIER", "qwen_qlora")
     env.setdefault("INCIDENT_ANALYSIS_MODE", "ollama")
     env.setdefault("LOCAL_QWEN_MODEL", "qwen3:1.7b")
     env["OLLAMA_NO_CLOUD"] = "1"

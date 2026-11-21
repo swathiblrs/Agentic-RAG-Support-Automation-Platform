@@ -35,6 +35,7 @@ from public_faq_cache import PublicFAQCache
 from external_routes import build_router
 from job_routes import build_job_router
 from routing_model import embedding_worker as routing_worker
+from qwen_classifier import worker as qwen_routing_worker
 
 faq_cache = PublicFAQCache(ROOT / 'university_eval_questions.json')
 CASES_DB = Path(os.getenv('CASES_DB_PATH', str(ROOT / 'cases.sqlite3')))
@@ -47,6 +48,7 @@ async def lifespan(app):
     finally:
         worker.close()
         routing_worker.close()
+        qwen_routing_worker.close()
 
 api = FastAPI(title='Enterprise IT Support and Incident Investigation - Local Prototype', lifespan=lifespan)
 TEAMS = {'security':'SOC', 'production':'SRE', 'cloud':'Cloud Infrastructure', 'data':'Data Engineering', 'it':'IT Operations'}
@@ -194,7 +196,23 @@ def compose_result(request, result, report):
 def execute(request):
     started = perf_counter()
     classification = classify_intake(request, worker.classify)
-    return PlatformWorkflow(sys.modules[__name__]).run(request, classification, started=started)
+    first = PlatformWorkflow(sys.modules[__name__]).run(request, classification, started=started)
+    if first.get('route_verification', {}).get('status') not in ('alternate', 'review'):
+        return first
+    classification = classify_intake(request, worker.classify)
+    result = PlatformWorkflow(sys.modules[__name__]).run(request, classification, started=started)
+    result['previous_attempt'] = first
+    resolved = result.get('route_verification', {}).get('status') == 'supported'
+    result['verification_retry'] = {'reruns': 1, 'max_reruns': 1, 'resolved': resolved}
+    result['execution_trace'].insert(0, 'Verification mismatch: full restart from main classification; one retry maximum')
+    if not resolved:
+        message = 'Classification mismatch remains after one full retry. Examine both attempts and their findings before further investigation.'
+        result['classification_mismatch'] = {'review_required': True, 'message': message}
+        result['route_verification'] = {**result.get('route_verification', {}),
+                                       'status': 'review', 'review_required': True, 'reason': message}
+        if result.get('ticket_draft'):
+            result['ticket_draft']['next_action'] = 'human_review_before_submission'
+    return result
 
 @api.get('/', include_in_schema=False)
 def home():

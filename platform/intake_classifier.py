@@ -15,6 +15,8 @@ def classify_intake(request, ticket_classifier):
         "priority": ticket["ticket"]["priority"] if ticket else request.severity,
         "suggested_team": ticket["ticket"]["assigned_team"] if ticket else None,
         "support_classification": ticket,
-        "method": "existing_domain_policy_and_models_plus_existing_it_ticket_model",
+        "method": ("qwen_qlora_primary_plus_existing_it_ticket_model"
+                   if routing.get("routing_mode") == "qwen_qlora_primary"
+                   else "existing_domain_policy_and_models_plus_existing_it_ticket_model"),
         "scope": "initial_intake",
     }

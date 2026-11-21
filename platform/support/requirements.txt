@@ -1,9 +1,6 @@
 fastapi
 uvicorn
 streamlit
-langchain
-langchain-community
-langchain-openai
 llama-index-core<0.14
 banks<2.4
 chromadb

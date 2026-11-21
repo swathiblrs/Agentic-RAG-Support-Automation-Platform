@@ -1,7 +1,9 @@
 """Auditable domain policy. Scores are evidence weights, not probabilities."""
 import json
+import os
 import re
 from routing_model import predict
+from qwen_classifier import predict as predict_qwen
 
 PATTERNS = {
     'security': [(r'account takeover|impossible[- ]travel|password[- ]spray|brute[- ]force', 6),
@@ -46,6 +48,13 @@ def route(request):
     candidates = sorted(scores, key=scores.get, reverse=True)
     specific_terms = set(re.findall(r'[a-z]+', text)) - GENERIC_REQUEST_WORDS
     model_prediction = {'available': False, 'accepted': False}
+    primary_prediction = None
+    primary = os.getenv('DOMAIN_CLASSIFIER', 'qwen_qlora')
+    if primary not in ('minilm', 'qwen_qlora'):
+        raise ValueError('DOMAIN_CLASSIFIER must be minilm or qwen_qlora')
+    # Explicit operator selection is retained; automatic requests use Qwen first.
+    if primary == 'qwen_qlora' and request.domain == 'auto':
+        primary_prediction = predict_qwen(text.strip())
     if request.domain != 'auto':
         domain, mode = request.domain, 'explicit'
     elif definition and not evidence and not re.search(r'\b(?:utk|tennessee|netid|eduroam|volprint|myprint)\b', question):
@@ -54,6 +63,14 @@ def route(request):
         domain, mode = None, 'clarification'
     elif scores['security']:
         domain, mode = 'security', 'security_policy'
+        if primary_prediction is not None:
+            model_prediction = primary_prediction
+    elif primary_prediction is not None and primary_prediction.get('available'):
+        model_prediction = primary_prediction
+        if model_prediction.get('accepted') and model_prediction.get('domain') in PATTERNS:
+            domain, mode = model_prediction['domain'], 'qwen_qlora_primary'
+        else:
+            domain, mode = None, 'qwen_clarification'
     elif scores[candidates[0]] == 0:
         model_prediction = predict(text.strip())
         if model_prediction.get('accepted') and model_prediction.get('domain') != 'other':
@@ -70,4 +87,10 @@ def route(request):
             'matched_signals': matches.get(domain, []),
             'support_context': bool(scores['it']) or domain == 'it',
             'model_prediction': model_prediction,
-            'reason': 'Clarify missing or ambiguous domain.' if domain is None else 'Explicit domain or active evidence policy; preserve specialist support context.'}
+            'primary_classifier': primary,
+            'primary_prediction': primary_prediction,
+            'classifier_fallback_used': bool(primary_prediction is not None and not primary_prediction.get('available')),
+            'reason': ('Clarify missing or ambiguous domain.' if domain is None else
+                       'Fine-tuned Qwen domain; deterministic workflow selection and safety rules retained.'
+                       if mode == 'qwen_qlora_primary' else
+                       'Explicit domain or active evidence policy; preserve specialist support context.')}

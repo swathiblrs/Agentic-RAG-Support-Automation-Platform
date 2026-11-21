@@ -4,7 +4,7 @@
 
 Main classification runs first, outside LangGraph. Its domain, ticket details and retrieval hints feed the parent LangGraph, which coordinates the LlamaIndex support component and Qwen-based investigation component. See [the parent graph](PARENT_WORKFLOW.md) for exact nodes and bounded Qwen ↔ LlamaIndex documentation exchange. The lower-level ingestion/retrieval steps below are unchanged. The parent final node calls the result composer; the API/job worker persists the result.
 
-The domain routing policy and trained models are unchanged. A unified intake entry point now calls that policy plus the existing IT ticket model where applicable, and returns domain, workflow path, subcategory, priority, suggested team and retrieval hints together. The downstream support workflow consumes that decision without reclassifying. This is consolidation of existing models, not a new joint model or QLoRA deployment. Incident nodes parse supplied evidence and call local pretrained Qwen3 1.7B through Ollama; it is **not** the QLoRA classification adapter.
+The launcher now uses the trained Qwen3-0.6B v2 domain classifier before LangGraph, alongside the existing IT ticket model where applicable. The downstream support workflow consumes the intake decision without reclassifying. Explicit/security guards remain, and unavailable Qwen uses the earlier policy/MiniLM router with visible fallback metadata. This is not a newly trained joint model. Incident nodes use separate pretrained Qwen3 1.7B through Ollama; that generator is **not** the QLoRA classification adapter. [Classifier setup and limits](QWEN_CLASSIFIER.md).
 
 ## 1. Build the Support Knowledge Index (Before Requests)
 
@@ -44,7 +44,9 @@ flowchart TD
 
 Jobs are processed sequentially by this worker. The browser polls; it does not run the model. JWT signing material generated at API startup is for the demo, not a multi-instance production identity setup.
 
-## 3. Unified Intake With Existing Domain Router
+## 3. Unified Intake With Fine-tuned Qwen
+
+The default is `DOMAIN_CLASSIFIER=qwen_qlora`: explicit domain -> bypass; otherwise Qwen v2 six-candidate likelihoods -> development temperature/threshold -> security/generic safeguards -> accepted domain or clarification -> existing workflow-path policy. If Qwen is unavailable, `classifier_fallback_used=true` identifies the compatibility path expanded below. Set `DOMAIN_CLASSIFIER=minilm` to select compatibility mode explicitly.
 
 `intake_classifier.classify_intake()` owns the intake entry point. It calls the original domain policy below, then calls the resident support worker's classification-only operation once for IT/support-context requests. Pure non-IT requests have no invented IT subcategory. Clarification bypasses the ticket model. The response's `classification` field describes initial intake; post-workflow rerouting remains separately visible in `routing`.
 
@@ -91,7 +93,7 @@ flowchart TD
   M --> N["Category -> deterministic support team mapping"]
   N --> O{"Retrieved context present?"}
   O -->|"No"| P["Service Desk fallback"]
-  O -->|"Yes"| Q["Local retrieved text or template answer; live support generator disabled"]
+  O -->|"Yes"| Q["Local retrieved text or template answer; no support LLM branch"]
   P --> R["AnswerGeneratedEvent"]
   Q --> R
   R --> S["Confidence / ambiguity rules and next-action decision"]
@@ -166,5 +168,5 @@ Security limitations: redaction is best-effort, not a student-data compliance gu
 - One real direct synthetic incident completed with local Qwen in approximately 10.1 seconds (including graph work and initial model loading). This is a smoke test, not a latency benchmark.
 - A separate real browser submission exercised login, HTTP 202, queue consumption, local Qwen, persistence and polling. Desktop/mobile browser checks found no JavaScript page errors or horizontal overflow.
 - A later queued parent-graph test completed a real Qwen → LlamaIndex documentation lookup → Qwen reassessment in about 19.8 seconds on one synthetic production case. This is a functional smoke test, not a latency or answer-quality benchmark.
-- The first router and MiniLM model selection were not edited. Historical classification, retrieval and 65,000-request warm-cache figures do not describe the new live model path.
+- The launcher now selects Qwen v2 for primary domain classification; the earlier MiniLM selection is retained for compatibility. Historical classification, retrieval and 65,000-request warm-cache figures do not describe the new full live model path.
 - Download source: official Ollama release v0.40.16, with runtime SHA-256 verified against its published release digest. Qwen was pulled through the official Ollama registry and passed its digest verification. No third-party installer script, administrator install, cloud login or startup service was used.
